@@ -34,6 +34,20 @@ tensor * tensor_create(int rank, int * shape)
 
     return t;
 }
+tensor * tensor_copy(tensor * t) {
+    tensor * new_t = tensor_create(t->rank, t->shape);
+
+    // allocate memory for the tensor's data
+    int num_elems = tensor_num_elems(t);
+    t->data = (float*) malloc(sizeof(float) * num_elems);
+
+    // write t's data to new_t's data
+    for (int i = 0; i < num_elems; i++) {
+        new_t->data[i] = t->data[i];
+    }
+
+    return new_t;
+}
 void free_tensor(tensor * t) 
 {
     free(t->shape);
@@ -182,10 +196,10 @@ typedef struct
 int tensor_head_scaled_dot_product(tensor * t0, tensor * t1, int head_c, float * out)
 {   
     // check to make sure that the tensors are valid
-    if (t0->rank != 1 || t1->rank != 1) { fprintf(stderr, "tensor_attention: t0 and t1 should both be of rank 1"); return 1; }
+    if (t0->rank != 1 || t1->rank != 1) { fprintf(stderr, "tensor_head_scaled_dot_product: t0 and t1 should both be of rank 1"); return 1; }
     int dim = t0->shape[0];
-    if (dim != t1->shape[0]) { fprintf(stderr, "tensor_attention: the t0 and t1 have different dimensionalities!"); return 1; }
-    if (dim % head_c != 0) {fprintf(stderr, "tensor_attention: the dimensionality of t0 and t1 must be divisible by the number of heads"); return 1;}
+    if (dim != t1->shape[0]) { fprintf(stderr, "tensor_head_scaled_dot_product: the t0 and t1 have different dimensionalities!"); return 1; }
+    if (dim % head_c != 0) {fprintf(stderr, "tensor_head_scaled_dot_product: the dimensionality of t0 and t1 must be divisible by the number of heads"); return 1;}
 
 
     int head_dim = dim / head_c;
@@ -211,6 +225,45 @@ int tensor_head_scaled_dot_product(tensor * t0, tensor * t1, int head_c, float *
 
     return 0;
 }
+int tensor_columnwise_softmax(tensor * t)
+{
+    if (t->rank != 2) { fprintf(stderr, "tensor_columnwise_softmax: t should be a matrix (it should have rank 2)"); return 1; }
+    
+    int num_elems = tensor_num_elems(t);
+
+    // turn each element of t into an exponent of e
+    for (int i = 0; i < num_elems; i++) {
+        t->data[i] = exp(t->data[i]);
+    }
+
+    // get the summations of each of the matrix's columns
+    
+    int num_columns = t->shape[1];
+    float* column_sums = (float*) malloc(sizeof(float) * num_columns);
+    // set each column sum to 0
+    for (int i = 0; i < num_columns; i++) { column_sums[i] = 0.0; }
+    int k = 0;
+    for (int i = 0; i < num_elems; i++) {
+        column_sums[k] += t->data[i];
+        k++;
+        if (k >= num_columns) {
+            k = 0;
+        }
+    }
+    k = 0;
+
+    // divide each element by its column's summation
+    for (int i = 0; i < num_elems; i ++) {
+        t->data[i] /= column_sums[k];
+        k++;
+        if (k >= num_columns) {
+            k = 0;
+        }
+    }
+
+    return 0;
+
+}
 void attention_node_forward(attention_node * node, int node_idx, int head_c, block_node** input_blocks, int block_c) 
 {
     // NOTE: Do not be confused and think that this is the
@@ -228,9 +281,50 @@ void attention_node_forward(attention_node * node, int node_idx, int head_c, blo
         tensor_head_scaled_dot_product(input_blocks[block_idx]->output_cache, input_blocks[node_idx]->output_cache, head_c, weight_mat_ptr);
     }
 
+    // compute softmax
+    tensor_columnwise_softmax(node->attention_weight_matrix);
 
+    // create the attention output
+    node->output_cache = tensor_create(1, input_blocks[node_idx]->output_cache->shape);
+    
+    
+    // apply the attention weights to the output vector of the node
+    int dim = tensor_num_elems(node->output_cache);
+    int head_dim = dim / head_c;
+
+    // make sure that the attention output is all 0s
+    for (int i = 0; i < dim; i++) { node->output_cache->data[i] = 0.0; }
+    
+    // for each block
+    for (int block_idx = 0; block_idx < block_c; block_idx++) {
+
+        int k = 0;
+
+        int block_idx_offset = 0;
+
+        // for each head section of the dim
+        for (int head = 0; head < head_c; head++) {
+
+            float weight = node->attention_weight_matrix->data[block_idx_offset + head];
+
+            // for each scalar in the dim
+            for (int i = 0; i < head_dim; i++) {
+
+                node->output_cache->data[k] += weight * input_blocks[block_idx]->output_cache->data[k];
+
+                k++;
+            }   
+        }
+
+        block_idx_offset += head_c;
+    }
+    
+
+    printf("attention weights: \n");
     tensor_print(node->attention_weight_matrix);
 
+    printf("attention output: \n");
+    tensor_print(node->output_cache);
 }
 
 
@@ -239,7 +333,7 @@ int main ()
     int shape0[1] = {16};
 
     tensor * t0 = tensor_create(1, shape0);
-    for (int i = 0; i < t0->shape[0]; i++) {t0->data[i] = 1.0;}
+    for (int i = 0; i < t0->shape[0]; i++) {t0->data[i] = 1.5;}
 
     tensor * t1 = tensor_create(1, shape0);
     for (int i = 0; i < t1->shape[0]; i++) {t1->data[i] = 1.0;}
