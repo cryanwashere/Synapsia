@@ -105,12 +105,14 @@ typedef struct
     // for full clarity, these are NOT matrices!
     // these is just the weights for one particular node,
     // and therefore they are just one dimensional vectors.
-    struct tensor * w_key;
-    struct tensor * w_query;
-    struct tensor * w_value; 
+    tensor * w_key;
+    tensor * w_query;
+    tensor * w_value; 
     
-    struct tensor * attention_weight_cache;
-    struct tensor * attended_cache;
+
+
+    tensor * attention_weight_matrix;
+    tensor * output_cache;
 
     // the dimensionality of all the weight vectors
     int rank;
@@ -126,9 +128,11 @@ typedef struct
  */
 typedef struct 
 {
-    struct attention_node * attention;
-    struct feedforward_node * feedforward;
-    struct tensor * output_cache;
+    attention_node * attention;
+    feedforward_node * feedforward;
+
+    tensor * output_cache;
+
 } block_node;
 
 typedef struct 
@@ -172,6 +176,8 @@ typedef struct
  * number of heads 
  * @param out
  * a section of memory of size: sizeof(float)*head_c, to write the output attention weights to 
+ * @return 
+ * an integer that is 1 or 0, representing if the function finished successfully
  */
 int tensor_head_scaled_dot_product(tensor * t0, tensor * t1, int head_c, float * out)
 {   
@@ -205,7 +211,6 @@ int tensor_head_scaled_dot_product(tensor * t0, tensor * t1, int head_c, float *
 
     return 0;
 }
-
 void attention_node_forward(attention_node * node, int node_idx, int head_c, block_node** input_blocks, int block_c) 
 {
     // NOTE: Do not be confused and think that this is the
@@ -214,14 +219,48 @@ void attention_node_forward(attention_node * node, int node_idx, int head_c, blo
     // other node. Since the heads are all computed at once here,
     // this is a matix of shape [ other nodes being attended to, number of heads]
     int attention_weight_matrix_shape[2] = { block_c, head_c};
-    tensor * attention_weight_matrix = tensor_create(2, attention_weight_matrix_shape);
+    node->attention_weight_matrix = tensor_create(2, attention_weight_matrix_shape);
+
+    // put the scaled dot products into the attention weight matrix
+    for (int block_idx = 0; block_idx < block_c; block_idx++) {
+        int weight_mat_idx = block_idx * head_c;
+        float * weight_mat_ptr = &node->attention_weight_matrix->data[weight_mat_idx];
+        tensor_head_scaled_dot_product(input_blocks[block_idx]->output_cache, input_blocks[node_idx]->output_cache, head_c, weight_mat_ptr);
+    }
 
 
+    tensor_print(node->attention_weight_matrix);
 
 }
 
 
 int main ()
+{
+    int shape0[1] = {16};
+
+    tensor * t0 = tensor_create(1, shape0);
+    for (int i = 0; i < t0->shape[0]; i++) {t0->data[i] = 1.0;}
+
+    tensor * t1 = tensor_create(1, shape0);
+    for (int i = 0; i < t1->shape[0]; i++) {t1->data[i] = 1.0;}
+
+    block_node * b0 = (block_node*) malloc(sizeof(block_node));
+    b0->output_cache = t0;
+
+    block_node * b1 = (block_node*) malloc(sizeof(block_node));
+    b1->output_cache = t1;
+    block_node * input_blocks[2] = {b0,b1};
+
+    attention_node * node = (attention_node*) malloc(sizeof(attention_node));
+
+    attention_node_forward(node, 0, 4, input_blocks, 2);
+
+
+    return 0;
+}
+
+
+int test0() 
 {
     int shape0[1] = {8};
     tensor * t0 = tensor_create(1, shape0);
