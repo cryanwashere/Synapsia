@@ -18,5 +18,8 @@ typedef struct {
 
 int main ()
 {
+
+    printf("here is some small change to see if I will be able to commit");
+
     return 0;
 }
