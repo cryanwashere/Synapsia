@@ -1,3 +1,3 @@
 # Synapsia
 
-This is a neural network library, created just for transformers!
+This is a neural network library, but just for transformers!
