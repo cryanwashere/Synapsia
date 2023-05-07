@@ -50,6 +50,32 @@ tensor * tensor_copy(tensor * t) {
     return new_t;
 }
 /**
+ * @brief Tensor Zeros
+ * 
+ * sets every element of t to 0
+ * 
+ * @param t 
+ * the tensor being turned set to zeros
+ */
+void tensor_zeros(tensor * t) 
+{
+    int num_elems = tensor_num_elems(t);
+
+    //#pragma omp parallel for 
+    for (int i = 0; i < num_elems; i++) {
+        t->data[i] = 0;
+    }
+}
+void tensor_ones(tensor * t)
+{
+    int num_elems = tensor_num_elems(t);
+
+    //#pragma omp parallel for 
+    for (int i = 0; i < num_elems; i++) {
+        t->data[i] = 1.0;
+    }
+}
+/**
  * @brief Tensor Broadcast Add
  * 
  * Add the elements of t1 to t0, elementwise.
@@ -598,6 +624,14 @@ void transformer_node_assign_parameters(transformer_node * tn_prototype, transfo
     }
 }
 
+// the linked list is nescessary for the transformer to store its
+// all of its nodes, and prototype nodes
+
+
+
+
+// Here is the transformer
+
 typedef struct 
 {
     // these transformer nodes never actually get used, but they hold
@@ -612,6 +646,7 @@ typedef struct
     int node_c;
     transformer_node** nodes;
 
+    // the number of heads that the node uses
     int head_c;
 
 }  transformer;
@@ -623,39 +658,6 @@ transformer * transformer_create()
     tr->node_c = 0;
 
     return tr;
-}
-
-
-
-
-
-
-/**
- * @brief Tensor Zeros
- * 
- * sets every element of t to 0
- * 
- * @param t 
- * the tensor being turned set to zeros
- */
-void tensor_zeros(tensor * t) 
-{
-    int num_elems = tensor_num_elems(t);
-
-    //#pragma omp parallel for 
-    for (int i = 0; i < num_elems; i++) {
-        t->data[i] = 0;
-    }
-}
-
-void tensor_ones(tensor * t)
-{
-    int num_elems = tensor_num_elems(t);
-
-    //#pragma omp parallel for 
-    for (int i = 0; i < num_elems; i++) {
-        t->data[i] = 1.0;
-    }
 }
 
 int main ()
