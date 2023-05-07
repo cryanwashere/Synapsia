@@ -1,0 +1,7 @@
+README.md
+pybind_synapsia.cpp
+setup.py
+synapsia.egg-info/PKG-INFO
+synapsia.egg-info/SOURCES.txt
+synapsia.egg-info/dependency_links.txt
+synapsia.egg-info/top_level.txt
