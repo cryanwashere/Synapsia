@@ -155,6 +155,36 @@ int tensor_vector_transformation(tensor * v, tensor * m, tensor * out)
     return 0;
 }
 
+void tensor_convolve_2D(tensor * lhs, tensor * rhs, tensor * out)
+{
+    int lhs_width = lhs->shape[1];
+    int lhs_height = lhs->shape[0];
+
+    int rhs_width = rhs->shape[1];
+    int rhs_height = rhs->shape[0];
+
+    // we assume that the tensors are storing data channels last
+    int lhs_channels = lhs->shape[2];
+    int rhs_channels = rhs->shape[2];
+
+    //#pragma omp parallel for
+    for (int i = 0; i < lhs_height; i++) {
+        for (int j = 0; j < lhs_width; j++) {
+            float sum = 0.0f;
+            for (int k = 0; k < rhs_width; k++) {
+                for (int l = 0; l < rhs_height; l++) {
+                    for (int c = 0; c < lhs_channels; c++) {
+                        for (int d = 0; d < rhs_channels; d++) {
+                            sum += lhs->data[(i+k) * width * lhs_channels + j + l * lhs_channels + c] * rhs->data[k * rhs_height * lhs_channels * rhs_channels + l * lhs_channels * rhs_channels + c * rhs_channels + d];
+                        }
+                    }
+                }
+            }
+            out->data[i * lhd_width * out_channels + j * out_channels] = sum;
+        }
+    }
+}
+
 
 typedef struct 
 {   
