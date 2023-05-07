@@ -158,6 +158,7 @@ int tensor_vector_transformation(tensor * v, tensor * m, tensor * out)
 
 typedef struct 
 {   
+    int dim;
     int hidden_dim;
 
     tensor * w_1;
@@ -175,10 +176,23 @@ typedef struct
 
     tensor * output_cache;
 
+    int hold_cache;
+
 } feedforward_node;
 feedforward_node * feedforward_node_create(int dim, int hidden_dim) 
 {
     feedforward_node * ff = (feedforward_node*) malloc(sizeof(feedforward_node));
+    ff->hold_cache = 1;
+
+    ff->dim = dim;
+    ff->hidden_dim = hidden_dim;
+
+    return ff;
+}
+void feedforward_node_create_parameters(feedforward_node * ff)
+{
+    int dim = ff->dim;
+    int hidden_dim = ff->hidden_dim;
 
     int w_1_shape[2] = { hidden_dim, dim };
     ff->w_1 = tensor_create(2, w_1_shape);
@@ -189,9 +203,23 @@ feedforward_node * feedforward_node_create(int dim, int hidden_dim)
     ff->w_2 = tensor_create(2, w_2_shape);
     int b_2_shape[1] = { dim };
     ff->b_2 = tensor_create(1, b_2_shape);
-
-    return ff;
 }
+/**
+ * @brief Feedforward Node Assign Parameters
+ * 
+ * sets the all of ff_call's parameters to pointers to ff_prototype's parameters.
+ * 
+ * @param ff_prototype 
+ * @param ff_call 
+ */
+void feedforward_node_assign_parameters(feedforward_node * ff_prototype, feedforward_node * ff_call)
+{
+    ff_call->w_1 = ff_prototype->w_1;
+    ff_call->b_1 = ff_prototype->b_1;
+    ff_call->w_2 = ff_prototype->w_2;
+    ff_call->b_2 = ff_prototype->b_2;
+}
+
 
 /**
  * @brief Attention Node
@@ -200,6 +228,9 @@ feedforward_node * feedforward_node_create(int dim, int hidden_dim)
  **/
 typedef struct 
 {
+
+    int dim;
+
     tensor * w_key;
     tensor * b_key;
 
@@ -208,44 +239,55 @@ typedef struct
 
     tensor * w_value;
     tensor * b_value; 
-    
-    // the dimensionality of all the weight vectors
-    int rank;
 
     tensor * attention_weight_matrix;
     tensor * output_cache;
 
+    int hold_cache;
+
 } attention_node; 
+attention_node * attention_node_create(int dim) {
+    attention_node * a = (attention_node*) malloc(sizeof(attention_node));
+    a->hold_cache = 1;
 
+    a->dim = dim;
+
+    return a;
+}
+void attention_node_create_parameters(attention_node * a)
+{
+    int dim = a->dim;
+    int w_shape[2] = { dim, dim };
+    int b_shape[1] = { dim };
+
+    a->w_key = tensor_create(2, w_shape);
+    a->b_key = tensor_create(1, b_shape);
+
+    a->w_query = tensor_create(2, w_shape);
+    a->b_query = tensor_create(1, b_shape);
+
+    a->w_value = tensor_create(2, w_shape);
+    a->b_value = tensor_create(1, b_shape);
+}
 /**
- * @brief Block Node 
+ * @brief Attention Node Assign Paramters
  * 
- * This structure contains the node elements of a certain transformer node 
- * at a specific block
+ * Sets each of a_call's parameters to pointers to a_prototype's corresponding parameters
  * 
+ * @param a_prototype 
+ * @param a_call 
  */
-typedef struct 
+void attention_node_assign_parameters(attention_node * a_prototype, attention_node * a_call)
 {
-    attention_node * attention;
-    feedforward_node * feedforward;
+    a_call->w_key = a_prototype->w_key;
+    a_call->b_key = a_prototype->b_key;
 
-    tensor * output_cache;
-} block_node;
+    a_call->w_query = a_prototype->w_query;
+    a_call->b_query = a_prototype->b_query;
 
-typedef struct 
-{    
-    // the blocks of the given node
-    int layer_c;
-    struct block_node** layers;
-} transformer_node;
-
-typedef struct 
-{
-    // the number of nodes that the transformer has
-    int node_c;
-    struct transformer_node** nodes;
-}  transformer;
-
+    a_call->w_value = a_prototype->w_value;
+    a_call->b_value = a_prototype->b_value;
+}
 /**
  * @brief Tensor Head Scaled Dot Product
  * 
@@ -308,6 +350,16 @@ int tensor_head_scaled_dot_product(tensor * t0, tensor * t1, int head_c, float *
 
     return 0;
 }
+/**
+ * @brief Tensor Columnwise softmax
+ * 
+ *  Compute softmax on each column of the tensor
+ * 
+ * @param t 
+ * a tensor of rank 2 (matrix)
+ * @return int 
+ * whether or not the function call was successful
+ */
 int tensor_columnwise_softmax(tensor * t)
 {
     if (t->rank != 2) { fprintf(stderr, "tensor_columnwise_softmax: t should be a matrix (it should have rank 2)"); return 1; }
@@ -347,6 +399,25 @@ int tensor_columnwise_softmax(tensor * t)
     return 0;
 
 }
+/**
+ * @brief Attention Node Forward
+ * 
+ * Compute the forward pass of an attention node. This will compute
+ * the attention weights between one specific node, and each of the 
+ * input blocks, and apply the attention. Note that we automatically
+ * split heads
+ * 
+ * @param node
+ * the node where the output is cached 
+ * @param node_idx 
+ * the index of the transformer node that the attention node is part of (its prior layer is one of the input blocks)
+ * @param head_c 
+ * the number of heads that are utilized by the attention mechanism
+ * @param input_blocks 
+ * the input blocks
+ * @param block_c 
+ * the number of input blocks
+ */
 void attention_node_forward(attention_node * node, int node_idx, int head_c, block_node** input_blocks, int block_c) 
 {
     // NOTE: Do not be confused and think that this is the
@@ -401,7 +472,6 @@ void attention_node_forward(attention_node * node, int node_idx, int head_c, blo
 
         block_idx_offset += head_c;
     }
-    
 
     printf("attention weights: \n");
     tensor_print(node->attention_weight_matrix);
@@ -415,18 +485,115 @@ void feedforward_node_forward(feedforward_node * ff, attention_node * attn_node)
 {
     // multiply by first weight matrix
     tensor_vector_transformation(attn_node->output_cache, ff->w_1, ff->w_1_cache);
-
+    
     // add first bias
     tensor_broadcast_add_out(ff->w_1_cache, ff->b_1, ff->b_1_cache);
+    if (ff->hold_cache == 0) { free_tensor(ff->w_1_cache); }
 
     // multiply by second weight matrix
     tensor_vector_transformation(ff->b_1_cache, ff->w_2, ff->w_2_cache);
+    if (ff->hold_cache == 0) { free_tensor(ff->b_1_cache); }
 
     // add second bias
     tensor_broadcast_add_out(ff->w_2_cache, ff->b_2, ff->b_2_cache);
+    if (ff->hold_cache == 0) { free_tensor(ff->w_2_cache); }
 
     ff->output_cache = ff->b_2_cache;
+    if (ff->hold_cache == 0) { free_tensor(ff->b_2_cache); }
 }
+
+/**
+ * @brief Block Node 
+ * 
+ * This structure contains the node elements of a certain transformer node 
+ * at a specific block
+ * 
+ */
+typedef struct 
+{
+    attention_node * attention;
+    feedforward_node * feedforward;
+
+    tensor * output_cache;
+} block_node;
+block_node * block_node_create(int dim, int hidden_dim) 
+{
+    block_node * b = (block_node*) malloc(sizeof(block_node));
+    b->attention = attention_node_create(dim);
+    b->feedforward = feedforward_node_create(dim, hidden_dim);
+    return b;
+}
+void block_node_create_parameters (block_node * b)
+{
+    attention_node_create_parameters(b->attention);
+    feedforward_node_create_parameters(b->feedforward);
+} 
+void block_node_assign_parameters(block_node * b_prototype, block_node * b_call)
+{
+    attention_node_assign_parameters(b_prototype->attention, b_call->attention);
+    feedforward_node_assign_parameters(b_prototype->feedforward, b_call->feedforward);
+}
+
+typedef struct 
+{    
+    // a node is comprised of a series of transformer
+    // blocks.
+    int layer_c;
+    block_node** blocks;
+
+} transformer_node;
+transformer_node * transformer_node_create(int layer_c, int dim, int hidden_dim)
+{
+    transformer_node * tn = (transformer_node*) malloc(sizeof(transformer_node));
+    tn->blocks = (block_node**) malloc(sizeof(block_node) * layer_c);
+    tn->layer_c = layer_c;
+
+    // create all of the block nodes for the transformer node
+    for (int layer = 0; layer < layer_c; layer++) {
+        tn->blocks[layer] = block_node_create(dim, hidden_dim);
+    }
+
+    return tn;
+}
+void transformer_node_create_parameters(transformer_node * tn)
+{
+    for (int i = 0; i < tn->layer_c; i++) {
+        block_node_create_parameters(tn->blocks[i]);
+    }
+}
+void transformer_node_assign_parameters(transformer_node * tn_prototype, transformer_node * tn_call)
+{
+    for (int i = 0; i < tn_prototype->layer_c; i++) {
+        block_node_assign_parameters(tn_prototype->blocks[i], tn_call->blocks[i]);
+    }
+}
+
+typedef struct 
+{
+    // these transformer nodes never actually get used, but they hold
+    // the weights for the other transformer nodes to use. 
+    int node_prototype_c;
+    transformer_node ** node_prototypes;
+
+
+    // these nodes are the actual acitivations of the transformer.
+    // all of their weights are pointers to weights stored somewhere
+    // in the node prototypes
+    int node_c;
+    transformer_node** nodes;
+
+    int head_c;
+
+}  transformer;
+transformer * transformer_create()
+{
+
+}
+
+
+
+
+
 
 /**
  * @brief Tensor Zeros
@@ -458,26 +625,7 @@ void tensor_ones(tensor * t)
 
 int main ()
 {
-    int shape0[1] = {16};
-
-    tensor * t0 = tensor_create(1, shape0);
-    tensor_ones(t0);
-
-    int shape1[2] = {4, 16};
-    tensor * t1 = tensor_create(2, shape1);
-    tensor_ones(t1);
-
-    int shape2[1] = {4};
-    tensor * t2 = tensor_create(1, shape2);
-
-
-    tensor_vector_transformation(t0, t1, t2);
-
-    tensor_print(t0);
-    tensor_print(t1);
-
-    tensor_print(t2);
-
+    
 
     
 
