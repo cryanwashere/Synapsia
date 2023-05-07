@@ -587,7 +587,12 @@ typedef struct
 }  transformer;
 transformer * transformer_create()
 {
+    transformer * tr = (transformer*) malloc(sizeof(transformer));
 
+    tr->node_prototype_c = 0;
+    tr->node_c = 0;
+
+    return tr;
 }
 
 
