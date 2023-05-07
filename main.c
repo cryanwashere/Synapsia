@@ -72,6 +72,14 @@ void tensor_broadcast_add(tensor * t0, tensor * t1)
         t0->data[i] += t1->data[i];
     }
 }
+void tensor_broadcast_add_out(tensor * t0, tensor * t1, tensor * out)
+{
+    int num_elems = tensor_num_elems(t0);
+
+    for (int i = 0; i < num_elems; i ++) {
+        out->data[i] = t1->data[i] + t0->data[i];
+    }
+}
 void free_tensor(tensor * t) 
 {
     free(t->shape);
@@ -124,7 +132,6 @@ void tensor_print(tensor * t) {
     printf(")\n");
 }
 
-
 int tensor_vector_transformation(tensor * v, tensor * m, tensor * out)
 {
     // make sure that the tensors are valid
@@ -140,7 +147,7 @@ int tensor_vector_transformation(tensor * v, tensor * m, tensor * out)
         int row_idx_offset = i * out_dim;
         // for each column in the matrix, and element of out
         for (int j = 0; j < out_dim; j++) {
-            dot_product += out->data[j] * m->data[row_idx_offset + j];
+            dot_product += v->data[j] * m->data[row_idx_offset + j];
         }
         out->data[i] = dot_product;
     }
@@ -159,7 +166,13 @@ typedef struct
     tensor * w_2;
     tensor * b_2;
 
-    tensor * hidden_cache;
+
+    tensor * w_1_cache;
+    tensor * b_1_cache;
+
+    tensor * w_2_cache;
+    tensor * b_2_cache;
+
     tensor * output_cache;
 
 } feedforward_node;
@@ -194,7 +207,7 @@ typedef struct
     tensor * b_query;
 
     tensor * w_value;
-    tensor * w_value; 
+    tensor * b_value; 
     
     // the dimensionality of all the weight vectors
     int rank;
@@ -397,6 +410,24 @@ void attention_node_forward(attention_node * node, int node_idx, int head_c, blo
     tensor_print(node->output_cache);
 }
 
+// I know the nonlinearity is missing for now!
+void feedforward_node_forward(feedforward_node * ff, attention_node * attn_node)
+{
+    // multiply by first weight matrix
+    tensor_vector_transformation(attn_node->output_cache, ff->w_1, ff->w_1_cache);
+
+    // add first bias
+    tensor_broadcast_add_out(ff->w_1_cache, ff->b_1, ff->b_1_cache);
+
+    // multiply by second weight matrix
+    tensor_vector_transformation(ff->b_1_cache, ff->w_2, ff->w_2_cache);
+
+    // add second bias
+    tensor_broadcast_add_out(ff->w_2_cache, ff->b_2, ff->b_2_cache);
+
+    ff->output_cache = ff->b_2_cache;
+}
+
 /**
  * @brief Tensor Zeros
  * 
@@ -415,14 +446,37 @@ void tensor_zeros(tensor * t)
     }
 }
 
+void tensor_ones(tensor * t)
+{
+    int num_elems = tensor_num_elems(t);
+
+    //#pragma omp parallel for 
+    for (int i = 0; i < num_elems; i++) {
+        t->data[i] = 1.0;
+    }
+}
+
 int main ()
 {
     int shape0[1] = {16};
 
     tensor * t0 = tensor_create(1, shape0);
-    tensor_zeros(t0);
+    tensor_ones(t0);
+
+    int shape1[2] = {4, 16};
+    tensor * t1 = tensor_create(2, shape1);
+    tensor_ones(t1);
+
+    int shape2[1] = {4};
+    tensor * t2 = tensor_create(1, shape2);
+
+
+    tensor_vector_transformation(t0, t1, t2);
 
     tensor_print(t0);
+    tensor_print(t1);
+
+    tensor_print(t2);
 
 
     
@@ -430,51 +484,4 @@ int main ()
    
 
     return 0;
-}
-
-int test1()
-{
-    int shape0[1] = {16};
-
-    tensor * t0 = tensor_create(1, shape0);
-    for (int i = 0; i < t0->shape[0]; i++) {t0->data[i] = 1.5;};
-
-    tensor * t1 = tensor_create(1, shape0);
-    for (int i = 0; i < t1->shape[0]; i++) {t1->data[i] = 1.0;}
-
-    block_node * b0 = (block_node*) malloc(sizeof(block_node));
-    b0->output_cache = t0;
-
-    block_node * b1 = (block_node*) malloc(sizeof(block_node));
-    b1->output_cache = t1;
-    block_node * input_blocks[2] = {b0,b1};
-
-    attention_node * node = (attention_node*) malloc(sizeof(attention_node));
-
-    attention_node_forward(node, 0, 4, input_blocks, 2);
-    return 0;
-} 
-
-
-int test0() 
-{
-    int shape0[1] = {8};
-    tensor * t0 = tensor_create(1, shape0);
-    for (int i = 0; i < t0->shape[0]; i++) {t0->data[i] = 1.0;}
-    tensor_print(t0);
-
-    tensor * t1 = tensor_create(1, shape0);
-    for (int i = 0; i < t1->shape[0]; i++) {t1->data[i] = 1.0;}
-    tensor_print(t1);
-
-    float * out = (float*) malloc(sizeof(float) * 2);
-    tensor_head_scaled_dot_product(t0, t1, 2, out);
-    
-    int shape3[1] = {2};
-    tensor * t3 = tensor_create(1, shape3);
-    free(t3->data);
-    t3->data = out;
-    tensor_print(t3);
-
-   // return 0;
 }
