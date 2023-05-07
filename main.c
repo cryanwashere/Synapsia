@@ -180,7 +180,7 @@ int tensor_vector_transformation(tensor * v, tensor * m, tensor * out)
 
     return 0;
 }
-
+/*
 void tensor_convolve_2D(tensor * lhs, tensor * rhs, tensor * out)
 {
     int lhs_width = lhs->shape[1];
@@ -210,7 +210,7 @@ void tensor_convolve_2D(tensor * lhs, tensor * rhs, tensor * out)
         }
     }
 }
-
+*/
 
 typedef struct 
 {   
@@ -455,6 +455,63 @@ int tensor_columnwise_softmax(tensor * t)
     return 0;
 
 }
+
+
+// I know the nonlinearity is missing for now!
+void feedforward_node_forward(feedforward_node * ff, attention_node * attn_node)
+{
+    // multiply by first weight matrix
+    tensor_vector_transformation(attn_node->output_cache, ff->w_1, ff->w_1_cache);
+    
+    // add first bias
+    tensor_broadcast_add_out(ff->w_1_cache, ff->b_1, ff->b_1_cache);
+    if (ff->hold_cache == 0) { free_tensor(ff->w_1_cache); }
+
+    // multiply by second weight matrix
+    tensor_vector_transformation(ff->b_1_cache, ff->w_2, ff->w_2_cache);
+    if (ff->hold_cache == 0) { free_tensor(ff->b_1_cache); }
+
+    // add second bias
+    tensor_broadcast_add_out(ff->w_2_cache, ff->b_2, ff->b_2_cache);
+    if (ff->hold_cache == 0) { free_tensor(ff->w_2_cache); }
+
+    ff->output_cache = ff->b_2_cache;
+    if (ff->hold_cache == 0) { free_tensor(ff->b_2_cache); }
+}
+
+/**
+ * @brief Block Node 
+ * 
+ * This structure contains the node elements of a certain transformer node 
+ * at a specific block
+ * 
+ */
+typedef struct 
+{
+    attention_node * attention;
+    feedforward_node * feedforward;
+
+    tensor * output_cache;
+} block_node;
+block_node * block_node_create(int dim, int hidden_dim) 
+{
+    block_node * b = (block_node*) malloc(sizeof(block_node));
+    b->attention = attention_node_create(dim);
+    b->feedforward = feedforward_node_create(dim, hidden_dim);
+    return b;
+}
+void block_node_create_parameters (block_node * b)
+{
+    attention_node_create_parameters(b->attention);
+    feedforward_node_create_parameters(b->feedforward);
+} 
+void block_node_assign_parameters(block_node * b_prototype, block_node * b_call)
+{
+    attention_node_assign_parameters(b_prototype->attention, b_call->attention);
+    feedforward_node_assign_parameters(b_prototype->feedforward, b_call->feedforward);
+}
+
+
 /**
  * @brief Attention Node Forward
  * 
@@ -536,59 +593,6 @@ void attention_node_forward(attention_node * node, int node_idx, int head_c, blo
     tensor_print(node->output_cache);
 }
 
-// I know the nonlinearity is missing for now!
-void feedforward_node_forward(feedforward_node * ff, attention_node * attn_node)
-{
-    // multiply by first weight matrix
-    tensor_vector_transformation(attn_node->output_cache, ff->w_1, ff->w_1_cache);
-    
-    // add first bias
-    tensor_broadcast_add_out(ff->w_1_cache, ff->b_1, ff->b_1_cache);
-    if (ff->hold_cache == 0) { free_tensor(ff->w_1_cache); }
-
-    // multiply by second weight matrix
-    tensor_vector_transformation(ff->b_1_cache, ff->w_2, ff->w_2_cache);
-    if (ff->hold_cache == 0) { free_tensor(ff->b_1_cache); }
-
-    // add second bias
-    tensor_broadcast_add_out(ff->w_2_cache, ff->b_2, ff->b_2_cache);
-    if (ff->hold_cache == 0) { free_tensor(ff->w_2_cache); }
-
-    ff->output_cache = ff->b_2_cache;
-    if (ff->hold_cache == 0) { free_tensor(ff->b_2_cache); }
-}
-
-/**
- * @brief Block Node 
- * 
- * This structure contains the node elements of a certain transformer node 
- * at a specific block
- * 
- */
-typedef struct 
-{
-    attention_node * attention;
-    feedforward_node * feedforward;
-
-    tensor * output_cache;
-} block_node;
-block_node * block_node_create(int dim, int hidden_dim) 
-{
-    block_node * b = (block_node*) malloc(sizeof(block_node));
-    b->attention = attention_node_create(dim);
-    b->feedforward = feedforward_node_create(dim, hidden_dim);
-    return b;
-}
-void block_node_create_parameters (block_node * b)
-{
-    attention_node_create_parameters(b->attention);
-    feedforward_node_create_parameters(b->feedforward);
-} 
-void block_node_assign_parameters(block_node * b_prototype, block_node * b_call)
-{
-    attention_node_assign_parameters(b_prototype->attention, b_call->attention);
-    feedforward_node_assign_parameters(b_prototype->feedforward, b_call->feedforward);
-}
 
 typedef struct 
 {    
@@ -627,44 +631,158 @@ void transformer_node_assign_parameters(transformer_node * tn_prototype, transfo
 // the linked list is nescessary for the transformer to store its
 // all of its nodes, and prototype nodes
 
+typedef struct list_node
+{   
+    void * data; 
+    struct list_node * next;
+} list_node;
 
+typedef struct
+{
+    list_node * head;
+} list;
+
+list_node * list_node_create(void * data)
+{
+    list_node * new_node = (list_node *) malloc(sizeof(list_node));
+    new_node->data = data;
+    new_node->next = NULL;
+    return new_node;
+}
+
+list * list_create()
+{
+    list * new_list = (list*) malloc(sizeof(list));
+    return new_list;
+}
+
+void list_append(list * ls, void * data)
+{
+    list_node * new_node = list_node_create(data);
+
+    if (ls->head == NULL) {
+        ls->head = new_node;
+    } else {
+        list_node * current = ls->head;
+        while (current->next != NULL) {
+            current = current->next;
+        }
+        current->next = new_node;
+    }
+}
+
+void * list_get(list * ls, int idx)
+{
+    int k = 0;
+
+    list_node * current = ls->head;
+
+    while (k <= idx) {
+        if (current->next == NULL) {
+            printf("list get: list index is out of range");
+            return NULL;
+        }
+        current = current->next;
+    }
+
+    return current;
+}
+
+void
+list_print (list * ls, void ( * print_fn)(void *))
+{
+    list_node * current = ls->head;
+
+    printf("[ ");
+    while (current != NULL) {
+        print_fn(current->data);
+        current = current->next;
+    }
+    printf(" ]\n");
+}
 
 
 // Here is the transformer
+
 
 typedef struct 
 {
     // these transformer nodes never actually get used, but they hold
     // the weights for the other transformer nodes to use. 
-    int node_prototype_c;
-    transformer_node ** node_prototypes;
+    transformer_node * prototype;
 
 
     // these nodes are the actual acitivations of the transformer.
     // all of their weights are pointers to weights stored somewhere
     // in the node prototypes
     int node_c;
-    transformer_node** nodes;
+    list * nodes;
 
     // the number of heads that the node uses
     int head_c;
+    int layer_c;
+    int dim;
+    int hidden_dim;
 
 }  transformer;
-transformer * transformer_create()
+transformer * transformer_create(int head_c, int layer_c, int dim, int hidden_dim)
 {
     transformer * tr = (transformer*) malloc(sizeof(transformer));
+    tr->nodes = (list*) malloc(sizeof(list));
 
-    tr->node_prototype_c = 0;
     tr->node_c = 0;
 
+    tr->head_c = head_c;
+    tr->layer_c = layer_c;
+    tr->dim = dim;
+    tr->hidden_dim = hidden_dim;
+
     return tr;
+}
+void transformer_add_node_prototype(transformer * tr, transformer_node * tn)
+{
+   tr->prototype = tn;
+}
+void transformer_add_node(transformer * tr)
+{
+    transformer_node * new_node = transformer_node_create(tr->layer_c, tr->dim, tr->hidden_dim);
+    list_append(tr->nodes, new_node);
+    tr->node_c++;
+}
+
+typedef struct 
+{
+    int head_c;
+    int layer_c;
+    int dim; 
+    int hidden_dim;
+} transformer_config;
+transformer_config * transformer_config_create (
+    int head_c,
+    int layer_c,
+    int dim,
+    int hidden_dim
+)
+{
+    transformer_config * tc = (transformer_config *) malloc(sizeof(transformer_config));
+
+    tc->head_c = head_c;
+    tc->layer_c = layer_c;
+    tc->dim = dim;
+    tc->hidden_dim = hidden_dim;
+
+    return tc;
 }
 
 int main ()
 {
-    
 
+    transformer_config * config = transformer_config_create(4, 6, 32, 64);
     
+    transformer * model = transformer_create(config->head_c, config->layer_c, config->dim, config->hidden_dim);
+
+    transformer_node * prototype = transformer_node_create(config->layer_c, config->dim, config->hidden_dim);
+    transformer_node_create_parameters(prototype);
 
    
 

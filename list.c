@@ -77,4 +77,5 @@ int main()
 
     list_print(ls, print_int);
 
+    return 0;
 }
